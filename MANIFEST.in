@@ -1,0 +1,5 @@
+include AGENTS.md
+include CHANGELOG.md
+recursive-include docs *.md *.png
+recursive-include scripts *.py
+recursive-include tests *.py *.mp4
