@@ -11,7 +11,7 @@ Frameblink is an early preview for agents who already have a short MP4 or WebM b
 Python 3.11+ is required. This preview is distributed as a GitHub release wheel, **not on PyPI**. Its PyAV dependency ships video-decoder wheels for the tested platforms, so a separate FFmpeg command is not part of the first-use path.
 
 ```sh
-python -m pip install https://github.com/codex-improvement-lab/frameblink/releases/download/v0.1.0a1/frameblink-0.1.0a1-py3-none-any.whl
+python -m pip install https://github.com/codex-improvement-lab/frameblink/releases/download/v0.1.0a2/frameblink-0.1.0a2-py3-none-any.whl
 frameblink demo --out ./frameblink-demo
 ```
 
@@ -24,6 +24,26 @@ frameblink scan ./bug.mp4 --out ./bug-review --json
 ```
 
 The output directory must not exist. Exit code 0 includes a valid **no candidate** result; exit 2 means an input or output setup error. `--threshold` (default `0.1`) and `--max-events` (default `6`, maximum `12`) are explicit options. A lower threshold can surface more candidates and false positives. The exported frame indices are zero based. Timestamps come from decoder presentation times relative to the first timed frame; check the original player if exact seek alignment matters.
+
+## Inspect a small region
+
+A tiny cursor or label change can disappear in whole-frame scoring. If you know the affected area, give its top-left position and size in **decoded source pixels**:
+
+```sh
+frameblink scan ./bug.mp4 --out ./region-review --region 600,300,240,160 --json
+```
+
+`--region X,Y,W,H` crops before scoring and exports that same region in each adjacent preview. Frame indices and times still refer to the original recording. The rectangle must fit the video; regional scans require constant frame dimensions. Regions are caller-selected, and a no-candidate result says nothing about changes outside them. Scores describe that selected area, not whole-page severity.
+
+Try the mode on the included authored clip:
+
+```sh
+frameblink demo --out ./region-demo --region 160,60,200,240
+```
+
+![Authored demo cropped to a declared 200 by 240 pixel region, showing adjacent frames 39, 40 and 41](docs/region-demo.png)
+
+The JSON records `analysis.region` (`null` for a whole-frame scan), `analysis.imageScope`, and actual `analysisDimensions`. Previews may be resized for readability; the source hash still identifies the complete input file. See the [alpha.2 notes](docs/RELEASE_NOTES_v0.1.0a2.md).
 
 ## When to choose it
 

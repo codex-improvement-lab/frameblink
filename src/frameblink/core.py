@@ -9,6 +9,7 @@ import math
 
 import av
 import numpy as np
+from PIL import Image
 
 from .render import make_triptych, render_html
 
@@ -59,7 +60,18 @@ def _time_relative(frame: av.VideoFrame, first_pts_time: float | None) -> tuple[
     return max(0.0, current - first_pts_time), first_pts_time
 
 
-def _decode_and_score(source: Path, threshold: float) -> tuple[dict, list[dict]]:
+def _region_tuple(region: tuple[int, int, int, int] | None) -> tuple[int, int, int, int] | None:
+    if region is None:
+        return None
+    if not isinstance(region, (tuple, list)) or len(region) != 4 or any(type(value) is not int for value in region):
+        raise FrameblinkError("Region must contain four integers: x,y,width,height")
+    x, y, width, height = region
+    if x < 0 or y < 0 or width < 1 or height < 1:
+        raise FrameblinkError("Region origin must be nonnegative and its width/height positive")
+    return x, y, width, height
+
+
+def _decode_and_score(source: Path, threshold: float, region: tuple[int, int, int, int] | None = None) -> tuple[dict, list[dict]]:
     try:
         container = av.open(str(source))
     except av.FFmpegError as exc:
@@ -76,8 +88,11 @@ def _decode_and_score(source: Path, threshold: float) -> tuple[dict, list[dict]]
         metadata_seconds = float(container.duration / av.time_base) if container.duration is not None else None
         if metadata_seconds is not None and metadata_seconds > MAX_DURATION_SECONDS:
             raise FrameblinkError(f"Video metadata exceeds {MAX_DURATION_SECONDS:g} seconds")
-        small_width = min(ANALYSIS_WIDTH, width)
-        small_height = max(1, round(height * small_width / width))
+        if region is not None and (region[0] + region[2] > width or region[1] + region[3] > height):
+            raise FrameblinkError(f"Region must fit within the decoded {width}x{height} source")
+        area_width, area_height = (region[2], region[3]) if region else (width, height)
+        small_width = min(ANALYSIS_WIDTH, area_width)
+        small_height = max(1, round(area_height * small_width / area_width))
         before = center = None
         before_to_center = None
         before_time = center_time = None
@@ -94,7 +109,14 @@ def _decode_and_score(source: Path, threshold: float) -> tuple[dict, list[dict]]
                     last_time = current_time
                     if current_time > MAX_DURATION_SECONDS:
                         raise FrameblinkError(f"Decoded video exceeds {MAX_DURATION_SECONDS:g} seconds")
-                current = frame.to_ndarray(width=small_width, height=small_height, format="gray")
+                if region is not None and (frame.width, frame.height) != (width, height):
+                    raise FrameblinkError("Region scanning requires constant decoded frame dimensions")
+                if region is None or region == (0, 0, width, height):
+                    current = frame.to_ndarray(width=small_width, height=small_height, format="gray")
+                else:
+                    x, y, area_width, area_height = region
+                    crop = frame.to_ndarray(format="gray")[y:y + area_height, x:x + area_width]
+                    current = np.asarray(Image.fromarray(crop).resize((small_width, small_height), Image.Resampling.BILINEAR))
                 if before is not None and center is not None:
                     center_to_current = _mean_absolute_difference(center, current)
                     before_to_current = _mean_absolute_difference(before, current)
@@ -156,19 +178,31 @@ def _select(candidates: list[dict], max_events: int) -> list[dict]:
     return selected
 
 
-def _images_for_events(source: Path, selected: list[dict], width: int, height: int) -> dict[int, object]:
+def _images_for_events(source: Path, selected: list[dict], width: int, height: int, region: tuple[int, int, int, int] | None = None) -> dict[int, object]:
     needed = {i + offset for item in selected for i in [item["centerFrameIndex"]] for offset in (-1, 0, 1)}
     if not needed:
         return {}
     preview_width = min(560, width)
     preview_height = max(1, round(height * preview_width / width))
+    if region:
+        x, y, area_width, area_height = region
+        scale = min(2.0, 560 / area_width, 420 / area_height)
+        preview_width = max(1, round(area_width * scale))
+        preview_height = max(1, round(area_height * scale))
     found = {}
     try:
         with av.open(str(source)) as container:
             stream = container.streams.video[0]
             for index, frame in enumerate(container.decode(stream)):
                 if index in needed:
-                    found[index] = frame.to_image(width=preview_width, height=preview_height).copy()
+                    if region:
+                        if (frame.width, frame.height) != (width, height):
+                            raise FrameblinkError("Region scanning requires constant decoded frame dimensions")
+                        crop = frame.to_image().crop((x, y, x + area_width, y + area_height))
+                        method = Image.Resampling.NEAREST if scale >= 1 else Image.Resampling.LANCZOS
+                        found[index] = crop.resize((preview_width, preview_height), method)
+                    else:
+                        found[index] = frame.to_image(width=preview_width, height=preview_height).copy()
                 if len(found) == len(needed):
                     break
     except av.FFmpegError as exc:
@@ -184,20 +218,24 @@ def scan_video(
     *,
     threshold: float = DEFAULT_THRESHOLD,
     max_events: int = DEFAULT_MAX_EVENTS,
+    region: tuple[int, int, int, int] | None = None,
 ) -> dict:
     """Scan one local video and write a candidate review to a new directory.
 
     A high score is a reason to inspect adjacent frames, not a bug verdict.
+    ``region=(x, y, width, height)`` limits scoring and previews to decoded
+    source pixels; frame indices and presentation times remain source-relative.
     """
     if not math.isfinite(threshold) or not 0 <= threshold <= 255:
         raise FrameblinkError("Threshold must be a finite grayscale difference from 0 to 255")
     if not 1 <= max_events <= 12:
         raise FrameblinkError("max_events must be between 1 and 12")
+    region = _region_tuple(region)
     source, output, byte_count = _local_video(video_path, output_dir)
     source_sha = _source_digest(source)
-    info, candidates = _decode_and_score(source, threshold)
+    info, candidates = _decode_and_score(source, threshold, region)
     selected = _select(candidates, max_events)
-    images = _images_for_events(source, selected, *info["sourceDimensions"])
+    images = _images_for_events(source, selected, *info["sourceDimensions"], region)
     if source.stat().st_size != byte_count or _source_digest(source) != source_sha:
         raise FrameblinkError("Source video changed while scanning; retry with a stable file")
     for rank, event in enumerate(selected, 1):
@@ -205,12 +243,14 @@ def scan_video(
         event["image"] = f"candidate-{rank:02d}.png"
     result = {
         "schemaVersion": "frameblink-review/1",
-        "version": "0.1.0a1",
+        "version": "0.1.0a2",
         "source": {"basename": source.name, "bytes": byte_count, "sha256": source_sha},
         **info,
         "analysis": {
             "method": "A-B-A candidate: min(MAD(before,center), MAD(center,after)) - MAD(before,after)",
             "grayscaleWidth": ANALYSIS_WIDTH,
+            "region": list(region) if region else None,
+            "imageScope": "declared region crop" if region else "full frame preview",
             "threshold": threshold,
             "candidateCount": len(candidates),
             "displayedCount": len(selected),
@@ -225,10 +265,12 @@ def scan_video(
             "Images may contain private content; review every output before sharing.",
         ],
     }
+    if region:
+        result["limitations"].append("Only the caller-selected region was scored and shown; changes outside it are not evaluated. Cropped previews may be resized for display.")
     output.mkdir()
     for event in selected:
         center = event["centerFrameIndex"]
-        image = make_triptych(images[center - 1], images[center], images[center + 1], event)
+        image = make_triptych(images[center - 1], images[center], images[center + 1], event, region=region)
         image.save(output / event["image"], format="PNG", optimize=True)
     (output / "events.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (output / "review.html").write_text(render_html(result), encoding="utf-8")

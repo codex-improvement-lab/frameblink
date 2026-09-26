@@ -32,4 +32,4 @@ jobs:
           python -m pip install build
           python -m build --wheel --sdist
       - name: Clean packaged first use
-        run: python scripts/package_smoke.py dist/frameblink-0.1.0a1-py3-none-any.whl
+        run: python scripts/package_smoke.py dist/frameblink-0.1.0a2-py3-none-any.whl

@@ -23,19 +23,21 @@ def _time(value: float | None) -> str:
     return f"{value:.3f}s" if value is not None else "time unavailable"
 
 
-def make_triptych(before: Image.Image, center: Image.Image, after: Image.Image, event: dict) -> Image.Image:
+def make_triptych(before: Image.Image, center: Image.Image, after: Image.Image, event: dict, *, region=None) -> Image.Image:
     """Keep the three actual adjacent previews in one visibly labeled PNG."""
     frames = [before.convert("RGB"), center.convert("RGB"), after.convert("RGB")]
-    panel_width, panel_height = frames[0].size
-    if any(frame.size != (panel_width, panel_height) for frame in frames):
+    frame_width, frame_height = frames[0].size
+    if any(frame.size != (frame_width, frame_height) for frame in frames):
         raise ValueError("Candidate frames must have the same preview dimensions")
+    panel_width, panel_height = max(360, frame_width), max(120, frame_height)
     margin, gap = 24, 16
     width = 2 * margin + 3 * panel_width + 2 * gap
     image_y = 156
     height = image_y + panel_height + 74
     card = Image.new("RGB", (width, height), PAPER)
     draw = ImageDraw.Draw(card)
-    draw.text((margin, 18), "FRAMEBLINK / VISUAL REVERSION CANDIDATE", fill=MUTED, font=_font(18))
+    scope = f"FRAMEBLINK / REGION {region[0]},{region[1]} / {region[2]}x{region[3]} SOURCE PIXELS" if region else "FRAMEBLINK / VISUAL REVERSION CANDIDATE"
+    draw.text((margin, 18), scope, fill=MUTED, font=_font(18))
     draw.text((margin, 49), f"Candidate {event['rank']:02d}  /  center frame {event['centerFrameIndex']}", fill=INK, font=_font(27))
     draw.text((margin, 91), f"A-B-A score {event['score']:.3f}  |  Review the full video before deciding what happened.", fill=MUTED, font=_font(17))
     centers = [event["centerFrameIndex"] - 1, event["centerFrameIndex"], event["centerFrameIndex"] + 1]
@@ -46,13 +48,16 @@ def make_triptych(before: Image.Image, center: Image.Image, after: Image.Image, 
         color = CORAL if index == 1 else MUTED
         draw.rounded_rectangle((x - 1, image_y - 35, x + panel_width + 1, image_y + panel_height + 1), radius=7, fill=WHITE, outline=CORAL if index == 1 else LINE, width=2 if index == 1 else 1)
         draw.text((x + 10, image_y - 30), f"{label}  /  frame {number}  /  {_time(time_value)}", fill=color, font=_font(17))
-        card.paste(frame, (x, image_y))
-    draw.text((margin, image_y + panel_height + 28), "A high score means the middle image differs while its neighbors are closer. It is not a bug verdict.", fill=MUTED, font=_font(17))
+        card.paste(frame, (x + (panel_width - frame_width) // 2, image_y + (panel_height - frame_height) // 2))
+    footer = "Only this declared region is scored and shown. Review the full source; a candidate is not a bug verdict." if region else "A high score means the middle image differs while its neighbors are closer. It is not a bug verdict."
+    draw.text((margin, image_y + panel_height + 28), footer, fill=MUTED, font=_font(17))
     return card
 
 
 def render_html(result: dict) -> str:
     source = escape(result["source"]["basename"])
+    region = result["analysis"].get("region")
+    scope = f"Scoring region: x={region[0]}, y={region[1]}, width={region[2]}, height={region[3]} decoded source pixels. Triples show this crop; inspect the source video for surrounding context." if region else "Scoring area: the full decoded frame. Previews are resized for display."
     cards = []
     for event in result["events"]:
         center = event["centerFrameIndex"]
@@ -91,6 +96,7 @@ a {{ color: #254db3; }}
 <div class="eyebrow">FRAMEBLINK / LOCAL VIDEO REVIEW</div>
 <h1>Catch the frame that came back.</h1>
 <p class="intro">Source: <strong>{source}</strong>. Frameblink ranks brief A→B→A visual changes for inspection. No source-code diagnosis or defect verdict is implied.</p>
+<p>{scope}</p>
 <div class="stats"><div class="stat"><strong>{result['framesDecoded']}</strong><span>decoded frames</span></div>
 <div class="stat"><strong>{result['analysis']['candidateCount']}</strong><span>above threshold {result['analysis']['threshold']}</span></div>
 <div class="stat"><strong>{result['analysis']['displayedCount']}</strong><span>adjacent triples shown</span></div></div>

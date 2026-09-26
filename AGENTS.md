@@ -5,6 +5,11 @@ candidates in an already captured local MP4/WebM and export adjacent before,
 center and after frames for human review. It does not classify bugs, infer root
 causes, inspect source code, verify user claims, or prove the absence of a glitch.
 
+Caller-selected regions use decoded source-pixel x/y/width/height coordinates.
+Score and preview only that rectangle, record the scope in JSON and images,
+and preserve original frame indices/times. Never describe a region scan as
+coverage of the rest of the frame.
+
 Keep one complete local CLI/API loop with strict file, duration, resolution and
 frame-count limits. Never upload source video, call a model, sign in, post, or
 send telemetry. Refuse existing output directories and label the output as

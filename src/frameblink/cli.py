@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from argparse import ArgumentParser
+from argparse import ArgumentParser, ArgumentTypeError
 from importlib.resources import as_file, files
 from pathlib import Path
 import json
@@ -10,6 +10,16 @@ import sys
 
 from . import __version__
 from .core import DEFAULT_MAX_EVENTS, DEFAULT_THRESHOLD, FrameblinkError, scan_video
+
+
+def _region(value: str) -> tuple[int, int, int, int]:
+    try:
+        parts = tuple(int(part) for part in value.split(","))
+    except ValueError as exc:
+        raise ArgumentTypeError("region must be x,y,width,height in source pixels") from exc
+    if len(parts) != 4:
+        raise ArgumentTypeError("region must be x,y,width,height in source pixels")
+    return parts
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -21,17 +31,19 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--out", type=Path, required=True, help="new output directory")
     scan.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD)
     scan.add_argument("--max-events", type=int, default=DEFAULT_MAX_EVENTS)
+    scan.add_argument("--region", type=_region, metavar="X,Y,W,H", help="score and show this source-pixel rectangle, with a top-left origin")
     scan.add_argument("--json", action="store_true", help="print a compact JSON summary")
     demo = commands.add_parser("demo", help="run the authored demonstration video")
     demo.add_argument("--out", type=Path, required=True, help="new output directory")
     demo.add_argument("--json", action="store_true", help="print a compact JSON summary")
+    demo.add_argument("--region", type=_region, metavar="X,Y,W,H", help="score and show a rectangle in the authored demo")
     args = parser.parse_args(argv)
     try:
         if args.command == "demo":
             with as_file(files("frameblink").joinpath("assets/demo.mp4")) as video:
-                result = scan_video(video, args.out)
+                result = scan_video(video, args.out, region=args.region)
         else:
-            result = scan_video(args.video, args.out, threshold=args.threshold, max_events=args.max_events)
+            result = scan_video(args.video, args.out, threshold=args.threshold, max_events=args.max_events, region=args.region)
     except (FrameblinkError, OSError) as exc:
         print(f"frameblink: {exc}", file=sys.stderr)
         return 2
@@ -40,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
         "framesDecoded": result["framesDecoded"],
         "candidateCount": result["analysis"]["candidateCount"],
         "displayedCount": result["analysis"]["displayedCount"],
+        "region": result["analysis"]["region"],
         "firstCandidateFrame": result["events"][0]["centerFrameIndex"] if result["events"] else None,
     }
     if args.json:
