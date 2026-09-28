@@ -4,6 +4,8 @@
 
 ![Authored Frameblink example: a sidebar suddenly grows for one frame and returns to its original width](docs/demo.png)
 
+[Watch the 14-second authored walkthrough](docs/walkthrough.md): original speed, labelled slow motion, then the adjacent-frame result. No customer recording is included.
+
 Frameblink is an early preview for agents who already have a short MP4 or WebM bug recording. It answers *which adjacent frames should I inspect?* A high score is **not** a bug verdict, proof of root cause, or proof that every glitch was found.
 
 ## First result
