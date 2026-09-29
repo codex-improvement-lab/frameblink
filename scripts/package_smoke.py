@@ -30,13 +30,24 @@ def main() -> None:
         python = env / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
         run(str(python), "-m", "pip", "install", "--disable-pip-version-check", str(wheel), cwd=scratch)
         version = run(str(python), "-m", "frameblink", "--version", cwd=scratch).stdout.strip()
-        assert version == "0.1.0a2", version
+        assert version == "0.2.0a1", version
         output = scratch / "demo-output"
         summary = json.loads(run(str(python), "-m", "frameblink", "demo", "--out", str(output), "--json", cwd=scratch).stdout)
         assert summary["firstCandidateFrame"] == 40, summary
         assert (output / "candidate-01.png").is_file()
         assert (output / "review.html").is_file()
         assert (output / "events.json").is_file()
+        small = scratch / "small-output"
+        small_summary = json.loads(run(str(python), "-m", "frameblink", "demo", "--small", "--out", str(small), "--json", cwd=scratch).stdout)
+        assert small_summary["firstCandidateFrame"] == 40, small_summary
+        small_result = json.loads((small / "events.json").read_text(encoding="utf-8"))
+        assert small_result["schemaVersion"] == "frameblink-review/2"
+        assert small_result["version"] == version
+        assert small_result["events"][0]["scoreMethod"] == "salient-pixels"
+        assert (small / small_result["events"][0]["detailImage"]).is_file()
+        global_small = scratch / "small-global"
+        global_summary = json.loads(run(str(python), "-m", "frameblink", "demo", "--small", "--mode", "global", "--out", str(global_small), "--json", cwd=scratch).stdout)
+        assert global_summary["candidateCount"] == 0, global_summary
         regional = scratch / "regional-output"
         region_summary = json.loads(run(str(python), "-m", "frameblink", "demo", "--out", str(regional), "--region", "160,60,200,240", "--json", cwd=scratch).stdout)
         assert region_summary["region"] == [160, 60, 200, 240]
@@ -45,7 +56,7 @@ def main() -> None:
         assert region_result["analysis"]["imageScope"] == "declared region crop"
         refused = subprocess.run([str(python), "-m", "frameblink", "demo", "--out", str(output)], cwd=scratch, text=True, capture_output=True)
         assert refused.returncode == 2 and "already exists" in refused.stderr
-        print(json.dumps({"cleanWheelInstall": "passed", "version": version, "frames": summary["framesDecoded"], "topFrame": 40, "regionalTopFrame": 40, "noOverwrite": True}))
+        print(json.dumps({"cleanWheelInstall": "passed", "version": version, "frames": summary["framesDecoded"], "topFrame": 40, "regionalTopFrame": 40, "tinyPulseTopFrame": 40, "tinyPulseGlobalCandidates": 0, "schema": "frameblink-review/2", "noOverwrite": True}))
 
 
 if __name__ == "__main__":

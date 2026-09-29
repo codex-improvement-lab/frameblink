@@ -23,7 +23,7 @@ def _time(value: float | None) -> str:
     return f"{value:.3f}s" if value is not None else "time unavailable"
 
 
-def make_triptych(before: Image.Image, center: Image.Image, after: Image.Image, event: dict, *, region=None) -> Image.Image:
+def make_triptych(before: Image.Image, center: Image.Image, after: Image.Image, event: dict, *, region=None, automatic_detail=False) -> Image.Image:
     """Keep the three actual adjacent previews in one visibly labeled PNG."""
     frames = [before.convert("RGB"), center.convert("RGB"), after.convert("RGB")]
     frame_width, frame_height = frames[0].size
@@ -37,9 +37,12 @@ def make_triptych(before: Image.Image, center: Image.Image, after: Image.Image, 
     card = Image.new("RGB", (width, height), PAPER)
     draw = ImageDraw.Draw(card)
     scope = f"FRAMEBLINK / REGION {region[0]},{region[1]} / {region[2]}x{region[3]} SOURCE PIXELS" if region else "FRAMEBLINK / VISUAL REVERSION CANDIDATE"
+    if automatic_detail:
+        scope = f"FRAMEBLINK / AUTO DETAIL {region[0]},{region[1]} / {region[2]}x{region[3]} SOURCE PIXELS"
     draw.text((margin, 18), scope, fill=MUTED, font=_font(18))
     draw.text((margin, 49), f"Candidate {event['rank']:02d}  /  center frame {event['centerFrameIndex']}", fill=INK, font=_font(27))
-    draw.text((margin, 91), f"A-B-A score {event['score']:.3f}  |  Review the full video before deciding what happened.", fill=MUTED, font=_font(17))
+    method = "Salient-pixel" if event.get("scoreMethod") == "salient-pixels" else "Full-area"
+    draw.text((margin, 91), f"{method} return score {event['score']:.3f}  |  Review the full video before deciding what happened.", fill=MUTED, font=_font(17))
     centers = [event["centerFrameIndex"] - 1, event["centerFrameIndex"], event["centerFrameIndex"] + 1]
     times = [event["beforeTimeSeconds"], event["centerTimeSeconds"], event["afterTimeSeconds"]]
     for index, (frame, number, time_value) in enumerate(zip(frames, centers, times)):
@@ -50,6 +53,8 @@ def make_triptych(before: Image.Image, center: Image.Image, after: Image.Image, 
         draw.text((x + 10, image_y - 30), f"{label}  /  frame {number}  /  {_time(time_value)}", fill=color, font=_font(17))
         card.paste(frame, (x + (panel_width - frame_width) // 2, image_y + (panel_height - frame_height) // 2))
     footer = "Only this declared region is scored and shown. Review the full source; a candidate is not a bug verdict." if region else "A high score means the middle image differs while its neighbors are closer. It is not a bug verdict."
+    if automatic_detail:
+        footer = "Automatic detail crop. See the context triple too; this is not an exhaustive map of changing pixels."
     draw.text((margin, image_y + panel_height + 28), footer, fill=MUTED, font=_font(17))
     return card
 
@@ -62,11 +67,17 @@ def render_html(result: dict) -> str:
     for event in result["events"]:
         center = event["centerFrameIndex"]
         path = escape(event["image"], quote=True)
+        detail_html = ""
+        if event.get("detailImage"):
+            dx, dy, dw, dh = event["detailRegion"]
+            detail_path = escape(event["detailImage"], quote=True)
+            detail_html = f"<h3>Automatic detail</h3><p>Source pixels x={dx}, y={dy}, width={dw}, height={dh}. This crop highlights one strong return; inspect the context above too.</p><img src='{detail_path}' alt='Automatic source-pixel crop of the same adjacent frames {center - 1}, {center}, and {center + 1}.' loading='lazy'>"
+        method = "salient-pixel" if event.get("scoreMethod") == "salient-pixels" else "full-area"
         cards.append(
             f"<article><div class='eyebrow'>CANDIDATE {event['rank']:02d} · FRAME {center} · {_time(event['centerTimeSeconds'])}</div>"
-            f"<h2>Momentary visual return, score {event['score']:.3f}</h2>"
+            f"<h2>Momentary visual return, {method} score {event['score']:.3f}</h2>"
             f"<p>The middle frame differs from both neighbors; its neighbors are more similar. Compare the three images, then check the source video.</p>"
-            f"<img src='{path}' alt='Decoded source frames {center - 1}, {center}, and {center + 1}, arranged before, candidate, after.' loading='lazy'></article>"
+            f"<img src='{path}' alt='Decoded source frames {center - 1}, {center}, and {center + 1}, arranged before, candidate, after.' loading='lazy'>{detail_html}</article>"
         )
     if not cards:
         cards.append("<article><h2>No candidates above this threshold</h2><p>This is not proof that the recording has no bug. Smooth, persistent, or one-way changes need another method.</p></article>")
@@ -98,7 +109,7 @@ a {{ color: #254db3; }}
 <p class="intro">Source: <strong>{source}</strong>. Frameblink ranks brief A→B→A visual changes for inspection. No source-code diagnosis or defect verdict is implied.</p>
 <p>{scope}</p>
 <div class="stats"><div class="stat"><strong>{result['framesDecoded']}</strong><span>decoded frames</span></div>
-<div class="stat"><strong>{result['analysis']['candidateCount']}</strong><span>above threshold {result['analysis']['threshold']}</span></div>
+<div class="stat"><strong>{result['analysis']['candidateCount']}</strong><span>candidate frames</span></div>
 <div class="stat"><strong>{result['analysis']['displayedCount']}</strong><span>adjacent triples shown</span></div></div>
 {''.join(cards)}
 <aside><h2>Read this with care</h2><ul>{limitations}</ul><p>Input SHA-256 and all scores are in <a href="events.json">events.json</a>. The hash identifies bytes, not authenticity. Review source frames and wording before sharing.</p></aside>

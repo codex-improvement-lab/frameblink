@@ -29,7 +29,8 @@ def main(argv: list[str] | None = None) -> int:
     scan = commands.add_parser("scan", help="review one local MP4/WebM")
     scan.add_argument("video", type=Path)
     scan.add_argument("--out", type=Path, required=True, help="new output directory")
-    scan.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD)
+    scan.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD, help="full-area mean threshold; the adaptive salient-pixel channel uses its own fixed cutoff")
+    scan.add_argument("--mode", choices=["adaptive", "global"], default="adaptive", help="adaptive adds small-change scoring and automatic detail crops; global uses only the original full-area mean")
     scan.add_argument("--max-events", type=int, default=DEFAULT_MAX_EVENTS)
     scan.add_argument("--region", type=_region, metavar="X,Y,W,H", help="score and show this source-pixel rectangle, with a top-left origin")
     scan.add_argument("--json", action="store_true", help="print a compact JSON summary")
@@ -37,13 +38,16 @@ def main(argv: list[str] | None = None) -> int:
     demo.add_argument("--out", type=Path, required=True, help="new output directory")
     demo.add_argument("--json", action="store_true", help="print a compact JSON summary")
     demo.add_argument("--region", type=_region, metavar="X,Y,W,H", help="score and show a rectangle in the authored demo")
+    demo.add_argument("--mode", choices=["adaptive", "global"], default="adaptive")
+    demo.add_argument("--small", action="store_true", help="use the authored tiny-pulse demo")
     args = parser.parse_args(argv)
     try:
         if args.command == "demo":
-            with as_file(files("frameblink").joinpath("assets/demo.mp4")) as video:
-                result = scan_video(video, args.out, region=args.region)
+            asset = "assets/local-demo.mp4" if args.small else "assets/demo.mp4"
+            with as_file(files("frameblink").joinpath(asset)) as video:
+                result = scan_video(video, args.out, region=args.region, mode=args.mode)
         else:
-            result = scan_video(args.video, args.out, threshold=args.threshold, max_events=args.max_events, region=args.region)
+            result = scan_video(args.video, args.out, threshold=args.threshold, max_events=args.max_events, region=args.region, mode=args.mode)
     except (FrameblinkError, OSError) as exc:
         print(f"frameblink: {exc}", file=sys.stderr)
         return 2
@@ -53,6 +57,7 @@ def main(argv: list[str] | None = None) -> int:
         "candidateCount": result["analysis"]["candidateCount"],
         "displayedCount": result["analysis"]["displayedCount"],
         "region": result["analysis"]["region"],
+        "mode": result["analysis"]["mode"],
         "firstCandidateFrame": result["events"][0]["centerFrameIndex"] if result["events"] else None,
     }
     if args.json:

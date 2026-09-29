@@ -21,3 +21,40 @@ The consequential result was **zero default Frameblink candidates**. The tool-av
 Alpha.2 subsequently added a caller-selected region. In a post-trial check using the region chosen during that investigation, it scored all 291 frames, found six above threshold, displayed five spaced candidates, and ranked the reviewed center frame 3 first; reviewed frame 16 was also present. This reused the investigated case and region, so it is feature verification rather than another blind result. The source pixels remain local and are not distributed here. Authored small-return and out-of-region controls exercise the implementation separately.
 
 The repository's `demo.mp4` and `smooth.mp4` are authored. Unit/workflow tests establish the expected positive and negative behavior, input rejection, and escaped review text for these fixtures. Hosted CI and packaged install results are reported only after they actually pass. They cannot prove low false positives across arbitrary animations, variable camera footage, audio-bearing recordings or every platform codec.
+
+## Adaptive 0.2 preview: a supplementary small-change comparison
+
+The original 202-pixel mean-distance channel is retained. A supplemental view
+caps the longest side at 960 pixels and compares the mean of the 64 strongest
+absolute pixel differences, using a return-score cutoff of 8.0. These settings
+were selected on previously inspected development inputs, then frozen before
+the two additional source recordings below were downloaded.
+
+The authored 1280×720, 8×8-pixel pulse is missed by the original mean channel and
+selected at frame 40 by adaptive mode. Ordinary monotone fades, persistent
+changes, stationary content and translating rectangles at overlapping/disjoint
+positions produced no candidates in the scoped controls. A matching variant with
+stronger simultaneous rectangle motion was missed by adaptive mode; a selected
+region recovered the pulse. This limit remains part of the product description.
+
+On the already investigated ImGui T2 input, adaptive mode found four candidates
+without a supplied region: centers 59, 63, 3 and 281. Details for 59 and 3 were
+visually inspected and show the cursor-shape return. This is development evidence,
+not another blind trial; it does not replace the original zero-candidate result.
+
+| Recording first executed after this implementation was frozen | Global mode | Adaptive mode | Reviewed result |
+| --- | --- | --- | --- |
+| [Zed #12827](https://github.com/zed-industries/zed/issues/12827), 976 frames | 40 candidates | 83 candidates | Both select frame 266 first; text is visibly restored in the center and fragmented in its neighbors |
+| [Ghostty #1632](https://github.com/ghostty-org/ghostty/issues/1632), 1,499 frames | 40 candidates | 57 candidates | Both select frame 1252 first; the monitor region darkens in the center and returns in its neighbors |
+
+The first six selections in both recordings were the same global-channel
+selections. Increased candidate counts do not establish improved recall or a
+false-positive rate. Only the first triples above were visually adjudicated;
+the additional lower-ranked candidates were not classified. The phone recording
+cannot distinguish application, display, camera or encoding causes.
+
+Ghostty's original MOV was retained and remuxed to a video-only MP4 for the
+supported input interface. Every decoded RGB frame and relative presentation
+timestamp matched the original; no video re-encoding was performed. These videos
+and all of their derived pixels remain outside the repository/package/social
+assets. No external use or complete-task timing comparison was conducted here.
